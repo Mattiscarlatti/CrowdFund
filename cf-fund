@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+if [ -z "$1" ]; then
+  >&2 echo "Usage: fund NAME"
+  exit 1
+fi
+
+all_utxos=$(blockfrost addresses/$(addr $1)/utxos)
+get1strecord=$(echo $all_utxos | jq -cs '.[][0]')
+getutxo=$(echo $get1strecord | grep -o '"tx_hash":"[^"]*' | grep -o '[^"]*$')
+getindex=$(echo $get1strecord | jq '.tx_index')
+utxo1=$getutxo'#'$getindex
+
+cardano-cli transaction build \
+  --babbage-era \
+  --testnet-magic 2 \
+  --tx-in $utxo1 \
+  --tx-out $(addr crowdfund)+"10000000" \
+  --tx-out-datum-embed-file $DATA_PATH/crowdFundDatum$1.json \
+  --change-address $(addr $1)\
+  --protocol-params-file protocol.params \
+  --out-file $TX_PATH/tx.raw
+
+tx-sign tx $1
+tx-submit tx

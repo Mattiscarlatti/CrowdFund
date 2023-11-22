@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+all_utxos=$(blockfrost addresses/addr_test1wzzfwhth6k3u3998pvk0wlhq2h9kzu5rah04vc625c33sysr93g9y/utxos)
+get1strecord=$(echo $all_utxos | jq -cs '.[][0]')
+getaddress=$(echo $get1strecord | grep -o '"address":"[^"]*' | grep -o '[^"]*$')
+getvalue=$(echo $get1strecord | grep -o '"quantity":"[^"]*' | grep -o '[^"]*$')
+getunit=$(echo $get1strecord | grep -o '"unit":"[^"]*' | grep -o '[^"]*$')
+getdatumhash=$(echo $get1strecord | grep -o '"data_hash":"[^"]*' | grep -o '[^"]*$')
+getutxo=$(echo $get1strecord | grep -o '"tx_hash":"[^"]*' | grep -o '[^"]*$')
+getindex=$(echo $get1strecord | jq '.tx_index')
+utxo1=$getutxo'#'$getindex
+getvalue2=$(($getvalue-379950))
+
+datumjson=$(blockfrost scripts/datum/$getdatumhash)
+datumpkh=$(echo $datumjson | grep -o '"bytes":"[^"]*' | grep -o '[^"]*$')
+datumpkhplus="60""$datumpkh"
+addresspkh=$(bech32 addr_test <<< $datumpkhplus)
+
+echo {'"'bytes'"':'"'$datumpkh'"'} >$DATA_PATH/$datumpkh.json
+
+all_utxosme=$(blockfrost addresses/addr_test1vp7fxnux02qpjky2ngkpvksf752yd9vs3sssy5j4kl0hf4q8pdx0t/utxos)
+get1strecordme=$(echo $all_utxosme | jq -cs '.[][0]')
+getutxome=$(echo $get1strecordme | grep -o '"tx_hash":"[^"]*' | grep -o '[^"]*$')
+getindexme=$(echo $get1strecordme | jq '.tx_index')
+utxome1=$getutxome'#'$getindexme
+
+cardano-cli transaction build \
+  --babbage-era \
+  --testnet-magic 2 \
+  --tx-in $utxo1 \
+  --tx-in-script-file $PLUTUS_SCRIPTS_PATH/crowdfund.plutus \
+  --tx-in-datum-file $DATA_PATH/$datumpkh.json \
+  --tx-in-redeemer-file $DATA_PATH/crowdFundRedeemerTrue.json \
+  --required-signer $KEYS_PATH/platformmanager.skey \
+  --tx-in-collateral $utxome1 \
+  --tx-in $utxome1 \
+  --tx-out $(addr campaignorganizer)+"$getvalue2" \
+  --change-address $(addr platformmanager) \
+  --invalid-before 32370419 \
+  --out-file $TX_PATH/cftx.raw
+
+tx-sign cftx platformmanager
+tx-submit cftx

@@ -1,0 +1,81 @@
+{-# HLINT ignore "Use if" #-}
+{-# HLINT ignore "Eta reduce" #-}
+{-# HLINT ignore "Redundant bracket" #-}
+{-# HLINT ignore "Use foldr" #-}
+{-# HLINT ignore "Use map" #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+{-# HLINT ignore "Move brackets to avoid $" #-}
+{-# OPTIONS_GHC -Wno-overlapping-patterns #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
+{-# HLINT ignore "Avoid lambda" #-}
+{-# HLINT ignore "Redundant if" #-}
+
+module Contracts.CrowdFundContract2 where
+
+import Jambhala.Plutus
+import Jambhala.Utils
+import Plutus.V2.Ledger.Contexts (ownHash)
+
+type CrowdFundRedeemer = Bool
+
+type PKHs = [(PubKeyHash, Value)]
+
+data CrowdFundDatum = CrowdFundDatum {gpkhs :: PKHs, gcurvalue :: Value, gcurcount :: Maybe Integer}
+  deriving (Generic, ToJSON, FromJSON)
+
+data Campaign = Campaign {gcNumber :: Integer, gcDeadline :: POSIXTime, gcCampaignManager :: PubKeyHash}
+  deriving (Generic, ToJSON, FromJSON)
+
+unstableMakeIsData ''CrowdFundDatum
+makeLift ''Campaign
+
+crowdFundLambda :: Campaign -> CrowdFundDatum -> CrowdFundRedeemer -> ScriptContext -> Bool
+crowdFundLambda (Campaign _ a b) (CrowdFundDatum c d e) f ctx@(ScriptContext txInfo _) =
+  case (from a `contains` txInfoValidRange txInfo) of
+    False -> case (getContinuingOutputs ctx) of
+      [o] ->
+        traceIfFalse "Funds can only be sent to the crowdfund address" (txOutAddress o #== scriptHashAddress (ownHash ctx))
+          && traceIfFalse "No value added" ((valueOf (txOutValue o) adaSymbol adaToken) #> (valueOf d adaSymbol adaToken))
+          && case (txOutDatum o) of
+            (OutputDatum (Datum g)) -> case unsafeFromBuiltinData (g) of
+              (CrowdFundDatum _ _ h) -> case e of
+                Nothing -> traceIfFalse "Counter not handled correctly" (h #== (Just 1))
+                Just i -> traceIfFalse "Counter not handled correctly" (h #== (Just (i #+ 1)))
+              _ -> trace "Wrong outputdatum" False
+            _ -> trace "Wrong datum" False
+      [] -> trace "No continuing output" False
+      _multipleOutputs -> trace "Multiple continuing outputs" False
+    True -> case f of
+      True -> traceIfFalse "Wrong signer" (head (txInfoSignatories txInfo) #== b)
+      False ->
+        traceIfFalse "Wrong signer or wrong receiver of the refund" (head (txInfoSignatories txInfo) #== b)
+          && pany (\o1 -> pany (\o2 -> ((pubKeyHashAddress (fst (o2))) #== (txOutAddress o1)) && (snd (o2)) #== (txOutValue o1)) c) (txInfoOutputs txInfo)
+{-# INLINEABLE crowdFundLambda #-}
+
+untypedLambda :: Campaign -> UntypedValidator
+untypedLambda campaign = mkUntypedValidator (crowdFundLambda campaign)
+{-# INLINEABLE untypedLambda #-}
+
+type CrowdFund2 = ValidatorContract "crowdfund2"
+
+compileScript :: Campaign -> CrowdFund2
+compileScript campaign = mkValidatorContract ($$(compile [||untypedLambda||]) `applyCode` liftCode campaign)
+
+exports :: JambExports
+exports =
+  export
+    (defExports compiledScript)
+      { dataExports =
+          [ (True :: Bool) `toJSONfile` "crowdFundRedeemerTrue",
+            (False :: Bool) `toJSONfile` "crowdFundRedeemerFalse"
+          ]
+      }
+  where
+    compiledScript = compileScript (Campaign 2 1699993080 "7c934f867a8019588a9a2c165a09f5144695908c21025255b7df74d4")
+
+--due date slot for this contract: 33337075
+
+pkhCampaignManager :: PubKeyHash
+pkhCampaignManager = "7c934f867a8019588a9a2c165a09f5144695908c21025255b7df74d4" --CampaignManager
+--pkhCampaignManager = "a2c20c77887ace1cd986193e4e75babd8993cfd56995cd5cfce609c2" --Emulator Wallet 1

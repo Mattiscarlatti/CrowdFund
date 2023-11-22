@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+totalvaluejson=$(blockfrost addresses/addr_test1wzzfwhth6k3u3998pvk0wlhq2h9kzu5rah04vc625c33sysr93g9y)
+totalvalue=$(echo $totalvaluejson | grep -o '"quantity":"[^"]*' | grep -o '[^"]*$')
+totalvalueunit=$(echo $totalvaluejson | grep -o '"unit":"[^"]*' | grep -o '[^"]*$')
+
+echo $totalvalue
+echo $totalvalueunit
